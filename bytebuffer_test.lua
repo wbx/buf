@@ -12,7 +12,7 @@ local C = (ffi.os == 'Windows') and ffi.load('msvcrt') or ffi.C
 
 
 ---@type ByteBuffer
-local ByteBuffer = require './bytebuffer_1'
+local ByteBuffer = require './bytebuffer'
 
 local function expectError(f, ...)
     assert(pcall(f, ...) == false)

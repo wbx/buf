@@ -16,6 +16,7 @@ ffi.cdef [[
     int fflush(FILE *stream);
 
     size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
+    size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
 
     int fgetc(FILE *stream);
     int fputc(int ch, FILE *stream);
@@ -50,8 +51,70 @@ local SEEK = {
 }
 
 
+if ffi.abi('win') then
+    ffi.cdef [[
+        uint16_t bswap16(uint16_t x) __asm__("_byteswap_ushort");
+        uint32_t bswap32(uint32_t x) __asm__("_byteswap_ulong");
+        uint64_t bswap64(uint64_t x) __asm__("_byteswap_uint64");
+    ]]
+else
+    ffi.cdef [[
+        uint16_t bswap16(uint16_t x) __asm__("__builtin_bswap16");
+        uint32_t bswap32(uint32_t x) __asm__("__builtin_bswap32");
+        uint64_t bswap64(uint64_t x) __asm__("__builtin_bswap64");
+    ]]
+end
+
+ffi.cdef [[
+    union arrToU16 { uint8_t arr[2]; uint16_t n; };
+    union arrToU32 { uint8_t arr[4]; uint32_t n; };
+    union arrToU64 { uint8_t arr[8]; uint64_t n; };
+    union u16ToArr { uint16_t n; uint8_t arr[2]; };
+    union u32ToArr { uint32_t n; uint8_t arr[4]; };
+    union u64ToArr { uint64_t n; uint8_t arr[8]; };
+]]
+
 -- local C = (ffi.os == 'Windows') and ffi.load('msvcrt') or ffi.C
 local U = (ffi.os == 'Windows') and ffi.load('ucrtbase') or ffi.C
+
+local conv = {}
+
+do
+    local arrToU16, u16ToArr = ffi.typeof 'union arrToU16', ffi.typeof 'union u16ToArr'
+    local arrToU32, u32ToArr = ffi.typeof 'union arrToU32', ffi.typeof 'union u32ToArr'
+    local arrToU64, u64ToArr = ffi.typeof 'union arrToU64', ffi.typeof 'union u64ToArr'
+
+    if ffi.abi('le') then
+        conv.asLE16 = function(arr) return arrToU16(arr).n end
+        conv.asLE32 = function(arr) return arrToU32(arr).n end
+        conv.asLE64 = function(arr) return arrToU64(arr).n end
+        conv.fromLE16 = function(n) return u16ToArr(n).arr end
+        conv.fromLE32 = function(n) return u32ToArr(n).arr end
+        conv.fromLE64 = function(n) return u64ToArr(n).arr end
+        conv.asBE16 = function(arr) return U.bswap16(arrToU16(arr).n) end
+        conv.asBE32 = function(arr) return U.bswap32(arrToU32(arr).n) end
+        conv.asBE64 = function(arr) return U.bswap64(arrToU64(arr).n) end
+        conv.fromBE16 = function(n) return u16ToArr(U.bswap16(n)).arr end
+        conv.fromBE32 = function(n) return u32ToArr(U.bswap32(n)).arr end
+        conv.fromBE64 = function(n) return u64ToArr(U.bswap64(n)).arr end
+    else
+        conv.asLE16 = function(arr) return U.bswap16(arrToU16(arr).n) end
+        conv.asLE32 = function(arr) return U.bswap32(arrToU32(arr).n) end
+        conv.asLE64 = function(arr) return U.bswap64(arrToU64(arr).n) end
+        conv.fromLE16 = function(n) return u16ToArr(U.bswap16(n)).arr end
+        conv.fromLE32 = function(n) return u32ToArr(U.bswap32(n)).arr end
+        conv.fromLE64 = function(n) return u64ToArr(U.bswap64(n)).arr end
+        conv.asBE16 = function(arr) return arrToU16(arr).n end
+        conv.asBE32 = function(arr) return arrToU32(arr).n end
+        conv.asBE64 = function(arr) return arrToU64(arr).n end
+        conv.fromBE16 = function(n) return u16ToArr(n).arr end
+        conv.fromBE32 = function(n) return u32ToArr(n).arr end
+        conv.fromBE64 = function(n) return u64ToArr(n).arr end
+    end
+end
+
+-- TODO make all cdecls into typeof return calls
+
 
 ---@alias endianness
 ---|>'"le"' # Little-endian
@@ -64,6 +127,7 @@ local U = (ffi.os == 'Windows') and ffi.load('ucrtbase') or ffi.C
 ---@field rw boolean    # Is the buffer also writable
 ---@field pos_stack number[] # Position stack for push and pop operations
 ---@field file ffi.cdata* # File handle
+---@field bufsize number  # fopen buffer size
 ---@field _funcs table private
 local FileBuffer = {}
 
@@ -216,8 +280,7 @@ function LEfn:read_u16()
         error("Reached end of file.")
     end
 
-    return buf[0] +
-        bit.lshift(buf[1], 8)
+    return conv.asLE16(buf)
 end
 function BEfn:read_u16()
     local buf = ffi.new("uint8_t[2]")
@@ -227,8 +290,7 @@ function BEfn:read_u16()
         error("Reached end of file.")
     end
 
-    return bit.lshift(buf[0], 8) +
-        buf[1]
+    return conv.asBE16(buf)
 end
 
 function LEfn:read_i16()
@@ -246,10 +308,7 @@ function LEfn:read_u32()
         error("Reached end of file.")
     end
 
-    return buf[0] +
-        bit.lshift(buf[1], 8) +
-        bit.lshift(buf[2], 16) +
-        0x1000000* buf[3]           -- lshift(x, 24)
+    return conv.asLE32(buf)
 end
 function BEfn:read_u32()
     local buf = ffi.new("uint8_t[4]")
@@ -259,10 +318,7 @@ function BEfn:read_u32()
         error("Reached end of file.")
     end
 
-    return 0x1000000 * buf[0] +     -- lshift(x, 24)
-        bit.lshift(buf[1], 16) +
-        bit.lshift(buf[2], 8) +
-        buf[3]
+    return conv.asBE32(buf)
 end
 
 function LEfn:read_i32()
@@ -291,24 +347,45 @@ function LEfn:write_u8(val)
     return self
 end
 BEfn.write_u8 = LEfn.write_u8
-LEfn.write_i8 = LEfn.write_u8
+
+function LEfn:write_i8(val)
+    self:checkWrite()
+    assert(U.fputc(val, self.file) ~= -1, "Reached end of file.")
+
+    return self
+end
 BEfn.write_i8 = LEfn.write_u8
 
 --
 
 function LEfn:write_u16(val)
     self:checkWrite()
-    assert(U.fputc(val, self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 8), self.file) ~= -1, "Reached end of file.")
+    local bw = U.fwrite(conv.fromLE16(val), 1, 2, self.file)
+    if bw < 2 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
 
     return self
 end
-LEfn.write_i16 = LEfn.write_u16
+function LEfn:write_i16(val)
+    self:checkWrite()
+    local bw = U.fwrite(conv.fromLE16(val), 1, 2, self.file)
+    if bw < 2 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
+
+    return self
+end
 
 function BEfn:write_u16(val)
     self:checkWrite()
-    assert(U.fputc(bit.rshift(val, 8), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(val, self.file) ~= -1, "Reached end of file.")
+    local bw = U.fwrite(conv.fromBE16(val), 1, 2, self.file)
+    if bw < 2 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
 
     return self
 end
@@ -318,21 +395,32 @@ BEfn.write_i16 = BEfn.write_u16
 
 function LEfn:write_u32(val)
     self:checkWrite()
-    assert(U.fputc(bit.band(val, 0xff), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 8), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 16), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 24), self.file) ~= -1, "Reached end of file.")
+    local bw = U.fwrite(conv.fromLE32(val), 1, 4, self.file)
+    if bw < 4 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
 
     return self
 end
-LEfn.write_i32 = LEfn.write_u32
+function LEfn:write_i32(val)
+    self:checkWrite()
+    local bw = U.fwrite(conv.fromLE32(val), 1, 4, self.file)
+    if bw < 4 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
+
+    return self
+end
 
 function BEfn:write_u32(val)
     self:checkWrite()
-    assert(U.fputc(bit.rshift(val, 24), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 16), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.rshift(val, 8), self.file) ~= -1, "Reached end of file.")
-    assert(U.fputc(bit.band(val, 0xff), self.file) ~= -1, "Reached end of file.")
+    local bw = U.fwrite(conv.fromBE32(val), 1, 4, self.file)
+    if bw < 4 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
 
     return self
 end

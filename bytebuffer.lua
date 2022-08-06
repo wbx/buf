@@ -10,7 +10,59 @@ ffi.cdef [[
     void free(void* mem);
     void* memset(void* ptr, int val, size_t n);
 ]]
+
+if ffi.abi('win') then
+    ffi.cdef [[
+        uint16_t bswap16(uint16_t x) __asm__("_byteswap_ushort");
+        uint32_t bswap32(uint32_t x) __asm__("_byteswap_ulong");
+        uint64_t bswap64(uint64_t x) __asm__("_byteswap_uint64");
+    ]]
+else
+    ffi.cdef [[
+        uint16_t bswap16(uint16_t x) __asm__("__builtin_bswap16");
+        uint32_t bswap32(uint32_t x) __asm__("__builtin_bswap32");
+        uint64_t bswap64(uint64_t x) __asm__("__builtin_bswap64");
+    ]]
+end
+
 local C = (ffi.os == 'Windows') and ffi.load('msvcrt') or ffi.C
+local U = (ffi.os == 'Windows') and ffi.load('ucrtbase') or ffi.C
+
+local conv = {}
+
+do
+    local u16ptr, u32ptr, u64ptr = ffi.typeof 'uint16_t*', ffi.typeof 'uint32_t*', ffi.typeof 'uint64_t*'
+
+    if ffi.abi('le') then
+        conv.asLE16 = function(ptr) return ffi.cast(u16ptr, ptr)[0] end
+        conv.asLE32 = function(ptr) return ffi.cast(u32ptr, ptr)[0] end
+        conv.asLE64 = function(ptr) return ffi.cast(u64ptr, ptr)[0] end
+        conv.fromLE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = n end
+        conv.fromLE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = n end
+        conv.fromLE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = n end
+        conv.asBE16 = function(ptr) return U.bswap16(ffi.cast(u16ptr, ptr)[0]) end
+        conv.asBE32 = function(ptr) return U.bswap32(ffi.cast(u32ptr, ptr)[0]) end
+        conv.asBE64 = function(ptr) return U.bswap64(ffi.cast(u64ptr, ptr)[0]) end
+        conv.fromBE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = U.bswap16(n) end
+        conv.fromBE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = U.bswap32(n) end
+        conv.fromBE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = U.bswap64(n) end
+    else
+        conv.asLE16 = function(ptr) return U.bswap16(ffi.cast(u16ptr, ptr)[0]) end
+        conv.asLE32 = function(ptr) return U.bswap32(ffi.cast(u32ptr, ptr)[0]) end
+        conv.asLE64 = function(ptr) return U.bswap64(ffi.cast(u64ptr, ptr)[0]) end
+        conv.fromLE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = U.bswap16(n) end
+        conv.fromLE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = U.bswap32(n) end
+        conv.fromLE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = U.bswap64(n) end
+        conv.asBE16 = function(ptr) return ffi.cast(u16ptr, ptr)[0] end
+        conv.asBE32 = function(ptr) return ffi.cast(u32ptr, ptr)[0] end
+        conv.asBE64 = function(ptr) return ffi.cast(u64ptr, ptr)[0] end
+        conv.fromBE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = n end
+        conv.fromBE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = n end
+        conv.fromBE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = n end
+    end
+end
+
+-- TODO make all cdecls into typeof return calls
 
 
 ---@alias endianness
@@ -146,9 +198,7 @@ end
 --
 
 function LEfn:read_u8()
-    local cur = self:advance(1)
-
-    return self.ct[cur]
+    return self.ct[self:advance(1)]
 end
 BEfn.read_u8 = LEfn.read_u8
 
@@ -160,16 +210,10 @@ BEfn.read_i8 = LEfn.read_i8
 --
 
 function LEfn:read_u16()
-    local cur = self:advance(2)
-
-    return self.ct[cur] +
-        bit.lshift(self.ct[cur + 1], 8)
+    return conv.asLE16(self.ct + self:advance(2))
 end
 function BEfn:read_u16()
-    local cur = self:advance(2)
-
-    return bit.lshift(self.ct[cur], 8) +
-        self.ct[cur + 1]
+    return conv.asBE16(self.ct + self:advance(2))
 end
 
 function LEfn:read_i16()
@@ -180,20 +224,10 @@ BEfn.read_i16 = LEfn.read_i16
 --
 
 function LEfn:read_u32()
-    local cur = self:advance(4)
-
-    return self.ct[cur] +
-        bit.lshift(self.ct[cur + 1], 8) +
-        bit.lshift(self.ct[cur + 2], 16) +
-        0x1000000* self.ct[cur + 3]         -- lshift(x, 24)
+    return conv.asLE32(self.ct + self:advance(4))
 end
 function BEfn:read_u32()
-    local cur = self:advance(4)
-
-    return 0x1000000 * self.ct[cur] +       -- lshift(x, 24)
-        bit.lshift(self.ct[cur + 1], 16) +
-        bit.lshift(self.ct[cur + 2], 8) +
-        self.ct[cur + 3]
+    return conv.asBE32(self.ct + self:advance(4))
 end
 
 function LEfn:read_i32()
@@ -205,9 +239,8 @@ BEfn.read_i32 = LEfn.read_i32
 
 function ByteBuffer:read_bytes(len)
     assert(type(len) == 'number' and len >= 0, "len must be a positive integer.")
-    local cur = self:advance(len)
 
-    return ffi.string(self.ct + cur, len)
+    return ffi.string(self.ct + self:advance(len), len)
 end
 
 
@@ -215,33 +248,34 @@ end
 
 function LEfn:write_u8(val)
     self:checkWrite()
-    local cur = self:advance(1)
-
-    self.ct[cur] = val
+    self.ct[self:advance(1)] = val
     return self
 end
 BEfn.write_u8 = LEfn.write_u8
-LEfn.write_i8 = LEfn.write_u8
+
+function LEfn:write_i8(val)
+    self:checkWrite()
+    self.ct[self:advance(1)] = val
+    return self
+end
 BEfn.write_i8 = LEfn.write_u8
 
 --
 
 function LEfn:write_u16(val)
     self:checkWrite()
-    local cur = self:advance(2)
-
-    self.ct[cur + 0] = val
-    self.ct[cur + 1] = bit.rshift(val, 8)
+    conv.fromLE16(self.ct + self:advance(2), val)
     return self
 end
-LEfn.write_i16 = LEfn.write_u16
+function LEfn:write_i16(val)
+    self:checkWrite()
+    conv.fromLE16(self.ct + self:advance(2), val)
+    return self
+end
 
 function BEfn:write_u16(val)
     self:checkWrite()
-    local cur = self:advance(2)
-
-    self.ct[cur + 0] = bit.rshift(val, 8)
-    self.ct[cur + 1] = val
+    conv.fromBE16(self.ct + self:advance(2), val)
     return self
 end
 BEfn.write_i16 = BEfn.write_u16
@@ -250,24 +284,18 @@ BEfn.write_i16 = BEfn.write_u16
 
 function LEfn:write_u32(val)
     self:checkWrite()
-    local cur = self:advance(4)
-
-    self.ct[cur + 0] = bit.band(val, 0xff)
-    self.ct[cur + 1] = bit.rshift(val, 8)
-    self.ct[cur + 2] = bit.rshift(val, 16)
-    self.ct[cur + 3] = bit.rshift(val, 24)
+    conv.fromLE32(self.ct + self:advance(4), val)
     return self
 end
-LEfn.write_i32 = LEfn.write_u32
+function LEfn:write_i32(val)
+    self:checkWrite()
+    conv.fromLE32(self.ct + self:advance(4), val)
+    return self
+end
 
 function BEfn:write_u32(val)
     self:checkWrite()
-    local cur = self:advance(4)
-
-    self.ct[cur + 0] = bit.rshift(val, 24)
-    self.ct[cur + 1] = bit.rshift(val, 16)
-    self.ct[cur + 2] = bit.rshift(val, 8)
-    self.ct[cur + 3] = bit.band(val, 0xff)
+    conv.fromBE32(self.ct + self:advance(4), val)
     return self
 end
 BEfn.write_i32 = BEfn.write_u32
@@ -276,9 +304,7 @@ BEfn.write_i32 = BEfn.write_u32
 
 function ByteBuffer:write_bytes(val)
     self:checkWrite()
-    local cur = self:advance(#val)
-
-    ffi.copy(self.ct + cur, val)
+    ffi.copy(self.ct + self:advance(#val), val)
     return self
 end
 
