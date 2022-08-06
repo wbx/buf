@@ -2,8 +2,10 @@
 
 --- Buffer v2
 
-local bit = require 'bit'
 local ffi = require 'ffi'
+
+local cast, typeof = ffi.cast, ffi.typeof
+local assert, type, tbins, tbrem = assert, type, table.insert, table.remove
 
 ffi.cdef [[
     void* malloc(size_t size);
@@ -28,37 +30,39 @@ end
 local C = (ffi.os == 'Windows') and ffi.load('msvcrt') or ffi.C
 local U = (ffi.os == 'Windows') and ffi.load('ucrtbase') or ffi.C
 
+local i8, i16, i32, i64 = typeof 'int8_t', typeof 'int16_t', typeof 'int32_t', typeof 'int64_t'
+
 local conv = {}
 
 do
-    local u16ptr, u32ptr, u64ptr = ffi.typeof 'uint16_t*', ffi.typeof 'uint32_t*', ffi.typeof 'uint64_t*'
+    local u16ptr, u32ptr, u64ptr = typeof 'uint16_t*', typeof 'uint32_t*', typeof 'uint64_t*'
 
     if ffi.abi('le') then
-        conv.asLE16 = function(ptr) return ffi.cast(u16ptr, ptr)[0] end
-        conv.asLE32 = function(ptr) return ffi.cast(u32ptr, ptr)[0] end
-        conv.asLE64 = function(ptr) return ffi.cast(u64ptr, ptr)[0] end
-        conv.fromLE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = n end
-        conv.fromLE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = n end
-        conv.fromLE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = n end
-        conv.asBE16 = function(ptr) return U.bswap16(ffi.cast(u16ptr, ptr)[0]) end
-        conv.asBE32 = function(ptr) return U.bswap32(ffi.cast(u32ptr, ptr)[0]) end
-        conv.asBE64 = function(ptr) return U.bswap64(ffi.cast(u64ptr, ptr)[0]) end
-        conv.fromBE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = U.bswap16(n) end
-        conv.fromBE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = U.bswap32(n) end
-        conv.fromBE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = U.bswap64(n) end
+        conv.asLE16 = function(ptr) return cast(u16ptr, ptr)[0] end
+        conv.asLE32 = function(ptr) return cast(u32ptr, ptr)[0] end
+        conv.asLE64 = function(ptr) return cast(u64ptr, ptr)[0] end
+        conv.fromLE16 = function(ptr, n) cast(u16ptr, ptr)[0] = n end
+        conv.fromLE32 = function(ptr, n) cast(u32ptr, ptr)[0] = n end
+        conv.fromLE64 = function(ptr, n) cast(u64ptr, ptr)[0] = n end
+        conv.asBE16 = function(ptr) return U.bswap16(cast(u16ptr, ptr)[0]) end
+        conv.asBE32 = function(ptr) return U.bswap32(cast(u32ptr, ptr)[0]) end
+        conv.asBE64 = function(ptr) return U.bswap64(cast(u64ptr, ptr)[0]) end
+        conv.fromBE16 = function(ptr, n) cast(u16ptr, ptr)[0] = U.bswap16(n) end
+        conv.fromBE32 = function(ptr, n) cast(u32ptr, ptr)[0] = U.bswap32(n) end
+        conv.fromBE64 = function(ptr, n) cast(u64ptr, ptr)[0] = U.bswap64(n) end
     else
-        conv.asLE16 = function(ptr) return U.bswap16(ffi.cast(u16ptr, ptr)[0]) end
-        conv.asLE32 = function(ptr) return U.bswap32(ffi.cast(u32ptr, ptr)[0]) end
-        conv.asLE64 = function(ptr) return U.bswap64(ffi.cast(u64ptr, ptr)[0]) end
-        conv.fromLE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = U.bswap16(n) end
-        conv.fromLE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = U.bswap32(n) end
-        conv.fromLE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = U.bswap64(n) end
-        conv.asBE16 = function(ptr) return ffi.cast(u16ptr, ptr)[0] end
-        conv.asBE32 = function(ptr) return ffi.cast(u32ptr, ptr)[0] end
-        conv.asBE64 = function(ptr) return ffi.cast(u64ptr, ptr)[0] end
-        conv.fromBE16 = function(ptr, n) ffi.cast(u16ptr, ptr)[0] = n end
-        conv.fromBE32 = function(ptr, n) ffi.cast(u32ptr, ptr)[0] = n end
-        conv.fromBE64 = function(ptr, n) ffi.cast(u64ptr, ptr)[0] = n end
+        conv.asLE16 = function(ptr) return U.bswap16(cast(u16ptr, ptr)[0]) end
+        conv.asLE32 = function(ptr) return U.bswap32(cast(u32ptr, ptr)[0]) end
+        conv.asLE64 = function(ptr) return U.bswap64(cast(u64ptr, ptr)[0]) end
+        conv.fromLE16 = function(ptr, n) cast(u16ptr, ptr)[0] = U.bswap16(n) end
+        conv.fromLE32 = function(ptr, n) cast(u32ptr, ptr)[0] = U.bswap32(n) end
+        conv.fromLE64 = function(ptr, n) cast(u64ptr, ptr)[0] = U.bswap64(n) end
+        conv.asBE16 = function(ptr) return cast(u16ptr, ptr)[0] end
+        conv.asBE32 = function(ptr) return cast(u32ptr, ptr)[0] end
+        conv.asBE64 = function(ptr) return cast(u64ptr, ptr)[0] end
+        conv.fromBE16 = function(ptr, n) cast(u16ptr, ptr)[0] = n end
+        conv.fromBE32 = function(ptr, n) cast(u32ptr, ptr)[0] = n end
+        conv.fromBE64 = function(ptr, n) cast(u64ptr, ptr)[0] = n end
     end
 end
 
@@ -71,11 +75,11 @@ end
 
 --- Byte buffer for sequential and 0-indexed reading/writing.
 ---@class ByteBuffer
----@field length number # Buffer length
----@field pos number    # Position to read next
+---@field length integer  # Buffer length
+---@field pos integer     # Position to read next
 ---@field mode endianness # Endianness of buffer reads/writes
 ---@field rw boolean    # Is the buffer also writable
----@field pos_stack number[] # Position stack for push and pop operations
+---@field pos_stack integer[] # Position stack for push and pop operations
 ---@field ct ffi.cdata* # Cdata pointer to buffer memory
 ---@field _ct ffi.cdata* private
 ---@field _funcs table private
@@ -121,7 +125,7 @@ function ByteBuffer.new(length, options)
     self._ct = ffi.gc(C.malloc(self.length), C.free)
 
     -- the cdata of type cdata<uint8_t *> that gets actually used.
-    self.ct = ffi.cast('uint8_t *', self._ct)
+    self.ct = cast('uint8_t *', self._ct)
 
     if options.zerofill then
         ffi.fill(self.ct, self.length)
@@ -147,7 +151,6 @@ function ByteBuffer:checkWrite()
 end
 
 
-
 --- Position functions ---
 
 --- Advance pos by `n`, returning current position before advance
@@ -159,19 +162,19 @@ function ByteBuffer:advance(n)
 end
 
 function ByteBuffer:push()
-    table.insert(self.pos_stack, self.pos)
+    tbins(self.pos_stack, self.pos)
     return self
 end
 
 function ByteBuffer:pop()
-    ---@type number
-    self.pos = assert(table.remove(self.pos_stack), "Nothing to pop from position stack.")
+    ---@type integer
+    self.pos = assert(tbrem(self.pos_stack), "Nothing to pop from position stack.")
     return self
 end
 
----@param pos number
+---@param pos integer
 function ByteBuffer:seek(pos)
-    assert(type(pos) == 'number', "pos must be a number.")
+    assert(type(pos) == 'number' or type(pos) == 'cdata', "pos must be an integer.")
     if pos < 0 then
         pos = self.length + pos
     end
@@ -183,16 +186,16 @@ end
 --- Read functions ---
 
 local function complement8(n)
-    return (n < 0x80) and n or (n - 0x100)
+    return cast(i8, n)
 end
 
 local function complement16(n)
-    return (n < 0x8000) and n or (n - 0x10000)
+    return cast(i16, n)
 end
 
 local function complement32(n)
-    return bit.band(n, 0x80000000) == 0 and (n)
-        or (n - 0xffffffff - 1)
+    -- weird things happen with casting directly to an int32_t
+    return cast(i32, cast(i64, n))
 end
 
 --
@@ -237,10 +240,11 @@ BEfn.read_i32 = LEfn.read_i32
 
 --
 
+local ffistr = ffi.string
 function ByteBuffer:read_bytes(len)
     assert(type(len) == 'number' and len >= 0, "len must be a positive integer.")
 
-    return ffi.string(self.ct + self:advance(len), len)
+    return ffistr(self.ct + self:advance(len), len)
 end
 
 
@@ -302,9 +306,10 @@ BEfn.write_i32 = BEfn.write_u32
 
 --
 
+local fficopy = ffi.copy
 function ByteBuffer:write_bytes(val)
     self:checkWrite()
-    ffi.copy(self.ct + self:advance(#val), val)
+    fficopy(self.ct + self:advance(#val), val)
     return self
 end
 

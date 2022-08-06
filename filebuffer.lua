@@ -1,8 +1,10 @@
 --->use-luvit<---
 
 local fs = require 'fs'
-local bit = require 'bit'
 local ffi = require 'ffi'
+
+local cast, typeof = ffi.cast, ffi.typeof
+local assert, type, tbins, tbrem = assert, type, table.insert, table.remove
 
 ffi.cdef [[
     //void* malloc(size_t size);
@@ -77,12 +79,16 @@ ffi.cdef [[
 -- local C = (ffi.os == 'Windows') and ffi.load('msvcrt') or ffi.C
 local U = (ffi.os == 'Windows') and ffi.load('ucrtbase') or ffi.C
 
+local i8, i16, i32, i64 = typeof 'int8_t', typeof 'int16_t', typeof 'int32_t', typeof 'int64_t'
+local u8_2, u8_4, u8_8 = typeof 'uint8_t[2]', typeof 'uint8_t[4]', typeof 'uint8_t[8]'
+local c_arr = typeof 'char[?]'
+
 local conv = {}
 
 do
-    local arrToU16, u16ToArr = ffi.typeof 'union arrToU16', ffi.typeof 'union u16ToArr'
-    local arrToU32, u32ToArr = ffi.typeof 'union arrToU32', ffi.typeof 'union u32ToArr'
-    local arrToU64, u64ToArr = ffi.typeof 'union arrToU64', ffi.typeof 'union u64ToArr'
+    local arrToU16, u16ToArr = typeof 'union arrToU16', typeof 'union u16ToArr'
+    local arrToU32, u32ToArr = typeof 'union arrToU32', typeof 'union u32ToArr'
+    local arrToU64, u64ToArr = typeof 'union arrToU64', typeof 'union u64ToArr'
 
     if ffi.abi('le') then
         conv.asLE16 = function(arr) return arrToU16(arr).n end
@@ -222,12 +228,12 @@ function FileBuffer:advance(n)
 end
 
 function FileBuffer:push()
-    table.insert(self.pos_stack, self.pos)
+    tbins(self.pos_stack, self.pos)
     return self
 end
 
 function FileBuffer:pop()
-    local n = assert(table.remove(self.pos_stack), "Nothing to pop from position stack.")
+    local n = assert(tbrem(self.pos_stack), "Nothing to pop from position stack.")
     U.fseek(self.file, n, SEEK.SET)
     return self
 end
@@ -243,16 +249,16 @@ end
 --- Read functions ---
 
 local function complement8(n)
-    return (n < 0x80) and n or (n - 0x100)
+    return cast(i8, n)
 end
 
 local function complement16(n)
-    return (n < 0x8000) and n or (n - 0x10000)
+    return cast(i16, n)
 end
 
 local function complement32(n)
-    return bit.band(n, 0x80000000) == 0 and (n)
-        or (n - 0xffffffff - 1)
+    -- weird things happen with casting directly to an int32_t
+    return cast(i32, cast(i64, n))
 end
 
 --
@@ -273,7 +279,7 @@ BEfn.read_i8 = LEfn.read_i8
 --
 
 function LEfn:read_u16()
-    local buf = ffi.new("uint8_t[2]")
+    local buf = u8_2()
     local br = U.fread(buf, 1, 2, self.file)
     if br < 2 then
         self:advance(-br)
@@ -283,7 +289,7 @@ function LEfn:read_u16()
     return conv.asLE16(buf)
 end
 function BEfn:read_u16()
-    local buf = ffi.new("uint8_t[2]")
+    local buf = u8_2()
     local br = U.fread(buf, 1, 2, self.file)
     if br < 2 then
         self:advance(-br)
@@ -301,7 +307,7 @@ BEfn.read_i16 = LEfn.read_i16
 --
 
 function LEfn:read_u32()
-    local buf = ffi.new("uint8_t[4]")
+    local buf = u8_4()
     local br = U.fread(buf, 1, 4, self.file)
     if br < 4 then
         self:advance(-br)
@@ -311,7 +317,7 @@ function LEfn:read_u32()
     return conv.asLE32(buf)
 end
 function BEfn:read_u32()
-    local buf = ffi.new("uint8_t[4]")
+    local buf = u8_4()
     local br = U.fread(buf, 1, 4, self.file)
     if br < 4 then
         self:advance(-br)
@@ -328,13 +334,14 @@ BEfn.read_i32 = LEfn.read_i32
 
 --
 
+local ffistr = ffi.string
 function FileBuffer:read_bytes(len)
     assert(type(len) == 'number' and len >= 0, "len must be a positive integer.")
 
-    local buf = ffi.new("char[?]", len)
+    local buf = c_arr(len)
     assert(U.fread(buf, 1, len, self.file) == len, "Reached end of file.")
 
-    return ffi.string(buf, len)
+    return ffistr(buf, len)
 end
 
 
