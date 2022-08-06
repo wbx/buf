@@ -198,6 +198,10 @@ local function complement32(n)
     return cast(i32, cast(i64, n))
 end
 
+local function complement64(n)
+    return cast(i64, n)
+end
+
 --
 
 function LEfn:read_u8()
@@ -237,6 +241,20 @@ function LEfn:read_i32()
     return complement32(self:read_u32())
 end
 BEfn.read_i32 = LEfn.read_i32
+
+--
+
+function LEfn:read_u64()
+    return conv.asLE64(self.ct + self:advance(8))
+end
+function BEfn:read_u64()
+    return conv.asBE64(self.ct + self:advance(8))
+end
+
+function LEfn:read_i64()
+    return complement64(self:read_u64())
+end
+BEfn.read_i64 = LEfn.read_i64
 
 --
 
@@ -303,6 +321,26 @@ function BEfn:write_u32(val)
     return self
 end
 BEfn.write_i32 = BEfn.write_u32
+
+--
+
+function LEfn:write_u64(val)
+    self:checkWrite()
+    conv.fromLE64(self.ct + self:advance(8), val)
+    return self
+end
+function LEfn:write_i64(val)
+    self:checkWrite()
+    conv.fromLE64(self.ct + self:advance(8), val)
+    return self
+end
+
+function BEfn:write_u64(val)
+    self:checkWrite()
+    conv.fromBE64(self.ct + self:advance(8), val)
+    return self
+end
+BEfn.write_i64 = BEfn.write_u64
 
 --
 

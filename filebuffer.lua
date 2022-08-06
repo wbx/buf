@@ -1,6 +1,5 @@
 --->use-luvit<---
 
-local fs = require 'fs'
 local ffi = require 'ffi'
 
 local cast, typeof = ffi.cast, ffi.typeof
@@ -26,6 +25,12 @@ ffi.cdef [[
 
     int fclose(FILE *stream);
 ]]
+
+if ffi.abi('win') then
+    ffi.cdef [[ int access(const char *pathname, int how) __asm__("_access"); ]]
+else
+    ffi.cdef [[ int access(const char *pathname, int how); ]]
+end
 
 if ffi.abi('64bit') then
     if ffi.abi('win') then
@@ -172,13 +177,13 @@ function FileBuffer.from(filename, options)
     self.bufsize = options.bufsize or 0
     self._funcs = (self.mode == 'be') and BEfn or LEfn
 
-    -- Since we can't somehow get errno, use uv fs to get error if any
-    do
-        local fd, errn, errmsg = fs.openSync(filename, self.rw and 'r+' or 'r')
-        if not fd then
-            return nil, errn .. ": " .. errmsg
-        end
-        fs.closeSync(fd)
+    -- Since we can't somehow get errno, use access to check exist and r/w
+    if U.access(filename, 0) == -1 then
+        return nil, "ENOENT: no such file."
+    end
+
+    if U.access(filename, self.rw and 0x6 or 0x4) == -1 then
+        return nil, "EACCES: cannot access file."
     end
 
     self.file = U.fopen(filename, self.rw and 'rb+' or 'rb')
@@ -261,6 +266,10 @@ local function complement32(n)
     return cast(i32, cast(i64, n))
 end
 
+local function complement64(n)
+    return cast(i64, n)
+end
+
 --
 
 function LEfn:read_u8()
@@ -331,6 +340,34 @@ function LEfn:read_i32()
     return complement32(self:read_u32())
 end
 BEfn.read_i32 = LEfn.read_i32
+
+--
+
+function LEfn:read_u64()
+    local buf = u8_8()
+    local br = U.fread(buf, 1, 8, self.file)
+    if br < 8 then
+        self:advance(-br)
+        error("Reached end of file.")
+    end
+
+    return conv.asLE64(buf)
+end
+function BEfn:read_u64()
+    local buf = u8_8()
+    local br = U.fread(buf, 1, 8, self.file)
+    if br < 8 then
+        self:advance(-br)
+        error("Reached end of file.")
+    end
+
+    return conv.asBE64(buf)
+end
+
+function LEfn:read_i64()
+    return complement64(self:read_u64())
+end
+BEfn.read_i64 = LEfn.read_i64
 
 --
 
@@ -432,6 +469,41 @@ function BEfn:write_u32(val)
     return self
 end
 BEfn.write_i32 = BEfn.write_u32
+
+--
+
+function LEfn:write_u64(val)
+    self:checkWrite()
+    local bw = U.fwrite(conv.fromLE64(val), 1, 8, self.file)
+    if bw < 8 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
+
+    return self
+end
+function LEfn:write_i64(val)
+    self:checkWrite()
+    local bw = U.fwrite(conv.fromLE64(val), 1, 8, self.file)
+    if bw < 8 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
+
+    return self
+end
+
+function BEfn:write_u64(val)
+    self:checkWrite()
+    local bw = U.fwrite(conv.fromBE64(val), 1, 8, self.file)
+    if bw < 8 then
+        self:advance(-bw)
+        error("Reached end of file and cannot write further.")
+    end
+
+    return self
+end
+BEfn.write_i64 = BEfn.write_u64
 
 --
 

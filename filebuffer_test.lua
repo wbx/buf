@@ -1,4 +1,4 @@
----use-luvit
+--->use-luvit<---
 
 local fs = require 'fs'
 local bit = require 'bit'
@@ -62,16 +62,22 @@ local function test()
         assert(bufLE:read_u16() == 0x6665)
         assert(bufLE:read_u32() == 0x6a696867)
         assert(bufLE:read_u32() == 0x6e6d6c6b)
+        bufLE:push():seek(10)
+        assert(bufLE:read_u64() == 0x7271706f6e6d6c6bULL)
+        assert(bufLE:read_u64() == 0x7a79787776757473ULL)
     end
 
     do -- positive signed tests --
-        bufLE:push():seek(0)
+        bufLE:seek(0)
         assert(bufLE:read_i8() == 0x61)
         assert(bufLE:read_i8() == 0x62)
         assert(bufLE:read_i16() == 0x6463)
         assert(bufLE:read_i16() == 0x6665)
         assert(bufLE:read_i32() == 0x6a696867)
         assert(bufLE:read_i32() == 0x6e6d6c6b)
+        bufLE:seek(10)
+        assert(bufLE:read_i64() == 0x7271706f6e6d6c6bLL)
+        assert(bufLE:read_i64() == 0x7a79787776757473LL)
     end
 
     do -- string tests --
@@ -99,6 +105,8 @@ local function test()
         expectError(function() return bufLE:read_u8() end)
         bufLE:seek(-2)
         assert(bufLE:read_u8() == 0xe9)
+        expectError(function() return bufLE:read_u64() end)
+        expectError(function() return bufLE:read_i64() end)
         expectError(function() return bufLE:read_u32() end)
         expectError(function() return bufLE:read_i32() end)
         expectError(function() return bufLE:read_u16() end)
@@ -117,6 +125,8 @@ local function test()
         assert(bufLE:read_u16() == 0x9185)
         assert(bufLE:read_u16() == 0xbda7)
         assert(bufLE:read_u32() == 0xffe9cac9)
+        bufLE:seek(28)
+        assert(bufLE:read_u64() == 0xffe9cac9bda79185ULL)
     end
 
     do -- negative signed tests --
@@ -126,20 +136,39 @@ local function test()
         assert(bufLE:read_i16() == 0x9185 - 0x10000)
         assert(bufLE:read_i16() == 0xbda7 - 0x10000)
         assert(bufLE:read_i32() == 0xffe9cac9 - 0xffffffff - 0x1)
+        bufLE:seek(28)
+        assert(bufLE:read_i64() == 0xffe9cac9bda79185LL)
     end
 
     do -- mixed signed test --
         bufLE:seek(24)
         assert(bufLE:read_i32() == 0x83817a79 - 0xffffffff - 0x1)
+        bufLE:seek(22)
+        assert(bufLE:read_i64() == 0x918583817a797877LL)
     end
 
     do -- write-read tests --
+        -- unsigned
+        bufLE:seek(8)
         bufLE:push():write_u8(0xa2):pop()
         assert(bufLE:read_u8() == 0xa2)
         bufLE:push():write_u16(0xb3c4):pop()
         assert(bufLE:read_u16() == 0xb3c4)
         bufLE:push():write_u32(0xb3c4d5e6):pop()
         assert(bufLE:read_u32() == 0xb3c4d5e6)
+        bufLE:push():write_u64(0xf0e1d2c3b4a59687ULL):pop()
+        assert(bufLE:read_u64() == 0xf0e1d2c3b4a59687ULL)
+        -- signed
+        bufLE:seek(8)
+        bufLE:push():write_i8(0xa2):pop()
+        assert(bufLE:read_i8() == 0xa2 - 0x100)
+        bufLE:push():write_i16(0xb3c4):pop()
+        assert(bufLE:read_i16() == 0xb3c4 - 0x10000)
+        bufLE:push():write_i32(0xb3c4d5e6):pop()
+        assert(bufLE:read_i32() == 0xb3c4d5e6 - 0xffffffff - 0x1)
+        bufLE:push():write_i64(0xf0e1d2c3b4a59687LL):pop()
+        assert(bufLE:read_i64() == 0xf0e1d2c3b4a59687LL)
+        -- string
         bufLE:seek(0)
         bufLE:push():write_bytes('qwertyuiopqwertyuiopqwertyuiop'):pop()
         assert(bufLE:read_bytes(30) == 'qwertyuiopqwertyuiopqwertyuiop')
@@ -159,7 +188,11 @@ local function test()
         assert(bufBE:read_u16() == 0x6364)
         assert(bufBE:read_u16() == 0x6566)
         assert(bufBE:read_u32() == 0x6768696a)
+        bufBE:push()
         assert(bufBE:read_u32() == 0x6b6c6d6e)
+        bufBE:pop()
+        assert(bufBE:read_u64() == 0x6b6c6d6e6f707172ULL)
+        assert(bufBE:read_u64() == 0x737475767778797aULL)
     end
 
     do -- positive signed tests --
@@ -169,7 +202,11 @@ local function test()
         assert(bufBE:read_i16() == 0x6364)
         assert(bufBE:read_i16() == 0x6566)
         assert(bufBE:read_i32() == 0x6768696a)
+        bufBE:push()
         assert(bufBE:read_i32() == 0x6b6c6d6e)
+        bufBE:pop()
+        assert(bufBE:read_u64() == 0x6b6c6d6e6f707172LL)
+        assert(bufBE:read_u64() == 0x737475767778797aLL)
     end
 
     do -- negative unsigned tests --
@@ -179,6 +216,8 @@ local function test()
         assert(bufBE:read_u16() == 0x8591)
         assert(bufBE:read_u16() == 0xa7bd)
         assert(bufBE:read_u32() == 0xc9cae9ff)
+        bufBE:seek(28)
+        assert(bufBE:read_u64() == 0x8591a7bdc9cae9ffULL)
     end
 
     do -- negative signed tests --
@@ -188,24 +227,45 @@ local function test()
         assert(bufBE:read_i16() == 0x8591 - 0x10000)
         assert(bufBE:read_i16() == 0xa7bd - 0x10000)
         assert(bufBE:read_i32() == 0xc9cae9ff - 0xffffffff - 0x1)
+        bufBE:seek(28)
+        assert(bufBE:read_u64() == 0x8591a7bdc9cae9ffLL)
     end
 
     do -- mixed signed test --
         bufBE:seek(24)
         assert(bufBE:read_i32() == 0x797a8183)
+        bufBE:seek(22)
+        assert(bufBE:read_i64() == 0x7778797a81838591LL)
     end
 
     do -- write-read tests --
+        -- unsigned
+        bufBE:seek(8)
         bufBE:push():write_u8(0xa2):pop()
         assert(bufBE:read_u8() == 0xa2)
         bufBE:push():write_u16(0xb3c4):pop()
         assert(bufBE:read_u16() == 0xb3c4)
         bufBE:push():write_u32(0xb3c4d5e6):pop()
         assert(bufBE:read_u32() == 0xb3c4d5e6)
+        bufBE:push():write_u64(0xf0e1d2c3b4a59687ULL):pop()
+        assert(bufBE:read_u64() == 0xf0e1d2c3b4a59687ULL)
+        -- signed
+        bufBE:seek(8)
+        bufBE:push():write_i8(0xa2):pop()
+        assert(bufBE:read_i8() == 0xa2 - 0x100)
+        bufBE:push():write_i16(0xb3c4):pop()
+        assert(bufBE:read_i16() == 0xb3c4 - 0x10000)
+        bufBE:push():write_i32(0xb3c4d5e6):pop()
+        assert(bufBE:read_i32() == 0xb3c4d5e6 - 0xffffffff - 0x1)
+        bufBE:push():write_i64(0xf0e1d2c3b4a59687LL):pop()
+        assert(bufBE:read_i64() == 0xf0e1d2c3b4a59687LL)
+        -- string
         bufBE:seek(0)
         bufBE:push():write_bytes('qwertyuiopqwertyuiopqwertyuiop'):pop()
         assert(bufBE:read_bytes(30) == 'qwertyuiopqwertyuiopqwertyuiop')
     end
+
+    bufBE:close()
 end
 
 
@@ -214,5 +274,5 @@ init()
 
 test()
 
+fs.unlinkSync("filebuftest.bin")
 print('pass')
-
