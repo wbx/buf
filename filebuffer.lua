@@ -272,13 +272,32 @@ end
 
 --
 
-function FileBuffer:iter()
+function FileBuffer:iterold()
     return function()
         local pos = self.pos
         local b = U.fgetc(self.file)
         if b ~= -1 then
             return pos, b
         end
+    end
+end
+
+local u8_buf = typeof 'uint8_t[?]'
+function FileBuffer:iter(bufsize)
+    bufsize = bufsize or 4096
+    local buf = u8_buf(bufsize)
+    local pos, n, i = 0, 0, 0
+
+    return function()
+        if i == 0 then
+            pos = U.ftell(self.file)
+            n = U.fread(buf, 1, bufsize, self.file)
+            if n == 0 then return end
+            i = n
+        end
+        local j = n - i
+        i = i - 1
+        return pos + j, buf[j]
     end
 end
 
