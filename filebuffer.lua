@@ -272,6 +272,18 @@ end
 
 --
 
+function FileBuffer:iter()
+    return function()
+        local pos = self.pos
+        local b = U.fgetc(self.file)
+        if b ~= -1 then
+            return pos, b
+        end
+    end
+end
+
+--
+
 function LEfn:read_u8()
     local b = U.fgetc(self.file)
     assert(b ~= -1, "Reached end of file.")

@@ -158,6 +158,27 @@ local function test()
         assert(bufLE:read_i64() == 0x918583817a797877LL)
     end
 
+    do -- iterator test --
+        bufLE:seek(0)
+        local i = 1
+        for pos, val in bufLE:iter() do
+            assert(pos == i - 1)
+            assert(string.byte(str, i, i) == val)
+            i = i + 1
+        end
+        bufLE:seek(26)
+        i = 27
+        for _, val in bufLE:iter() do
+            assert(string.byte(str, i, i) == val)
+            i = i + 1
+            if i == 32 then
+                bufLE:seek(3)
+                i = 4
+            end
+            if i == 25 then break end
+        end
+    end
+
     do -- write-read tests --
         -- unsigned
         bufLE:seek(8)

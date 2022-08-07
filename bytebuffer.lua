@@ -204,6 +204,17 @@ end
 
 --
 
+function ByteBuffer:iter()
+    return function()
+        if self.pos < self.length then
+            local pos = self:advance(1)
+            return pos, self.ct[pos]
+        end
+    end
+end
+
+--
+
 function LEfn:read_u8()
     return self.ct[self:advance(1)]
 end
