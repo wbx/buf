@@ -94,7 +94,8 @@ local BEfn = {}
 
 ---@param self ByteBuffer
 local function ByteBuffer__index(self, key)
-    if type(key) == 'number' then
+    if type(key) == 'number' or type(key) == 'cdata' then
+        key = tonumber(key)
         assert(key >= 0 and key < self.length, "Index out of bounds")
         return self.ct[key]
     end
@@ -105,7 +106,7 @@ end
 --- Create a new, empty buffer with size `length`.
 ---@return ByteBuffer
 function ByteBuffer.new(length, options)
-    assert(type(length) == 'number' and length >= 0, "length must be a positive integer.")
+    assert((type(length) == 'number' or type(length) == 'cdata') and length >= 0, "length must be a positive integer.")
     options = options or {}
 
     ---@type ByteBuffer
@@ -271,7 +272,7 @@ BEfn.read_i64 = LEfn.read_i64
 
 local ffistr = ffi.string
 function ByteBuffer:read_bytes(len)
-    assert(type(len) == 'number' and len >= 0, "len must be a positive integer.")
+    assert((type(len) == 'number' or type(len) == 'cdata') and len >= 0, "len must be a positive integer.")
 
     return ffistr(self.ct + self:advance(len), len)
 end
