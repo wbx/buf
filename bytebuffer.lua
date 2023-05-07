@@ -2,12 +2,10 @@
 
 --- Buffer v2
 
-local bit = require 'bit'
 local ffi = require 'ffi'
 
 local cast, typeof = ffi.cast, ffi.typeof
 local assert, type, tbins, tbrem = assert, type, table.insert, table.remove
-local band, bor, bxor, rsh, lsh = bit.band, bit.bor, bit.bxor, bit.rshift, bit.lshift
 
 ffi.cdef [[
     void* malloc(size_t size);
@@ -79,10 +77,9 @@ end
 ---@class ByteBuffer
 ---@field length integer  # Buffer length
 ---@field pos integer     # Position to read next
----@field bitpos integer  # Bit position to read next
 ---@field mode endianness # Endianness of buffer reads/writes
----@field rw boolean      # Is the buffer also writable
----@field pos_stack integer[2][]  # Position stack for push and pop operations
+---@field rw boolean    # Is the buffer also writable
+---@field pos_stack integer[] # Position stack for push and pop operations
 ---@field ct ffi.cdata* # Cdata pointer to buffer memory
 ---@field _ct ffi.cdata* private
 ---@field _funcs table private
@@ -117,7 +114,6 @@ function ByteBuffer.new(length, options)
     self.mode = options.mode == 'be' and 'be' or 'le'
     self.rw = options.rw and true or false
     self.length = length
-    self.bitpos = 0
     self.pos = 0
     self.pos_stack = {}
     self._funcs = (self.mode == 'be') and BEfn or LEfn
@@ -167,15 +163,13 @@ function ByteBuffer:advance(n)
 end
 
 function ByteBuffer:push()
-    tbins(self.pos_stack, {self.pos, self.bitpos})
+    tbins(self.pos_stack, self.pos)
     return self
 end
 
 function ByteBuffer:pop()
     ---@type integer
-    local pos = assert(tbrem(self.pos_stack), "Nothing to pop from position stack.")
-    self.pos = pos[1]
-    self.bitpos = pos[2]
+    self.pos = assert(tbrem(self.pos_stack), "Nothing to pop from position stack.")
     return self
 end
 
@@ -223,18 +217,7 @@ end
 --
 
 function LEfn:read_u8()
-    local pos = self:advance(1)
-    if self.bitpos == 0 then
-        return self.ct[pos]
-    else
-        return bor(
-            rsh(self.ct[pos], self.bitpos),
-            band(
-                lsh(self.ct[pos+1], 8-self.bitpos),
-                0xff
-            )
-        )
-    end
+    return self.ct[self:advance(1)]
 end
 BEfn.read_u8 = LEfn.read_u8
 
